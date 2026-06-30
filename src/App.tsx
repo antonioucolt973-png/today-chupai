@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { Play, RotateCcw } from "lucide-react";
 import { cardLabel, suitLabels } from "./game/cards";
 import {
@@ -11,6 +11,7 @@ import {
 } from "./game/board";
 import { createWave, moveMonsters, resolveSkill } from "./game/combat";
 import { evaluatePokerHand } from "./game/poker";
+import { loadGameSave, mergeGameSave, saveGameSave } from "./game/save";
 import { SKILL_PREVIEWS } from "./game/skillPreview";
 import { fillSkillSlots, pickCardsForSkillSlots } from "./game/skillSlots";
 import type { BoardCell, BoardMatch, Card, FloatingText, Monster, PokerEvaluation } from "./game/types";
@@ -51,8 +52,25 @@ const SKILL_EFFECTS = [
   { hand: "四条", effect: "超高单体爆发" },
   { hand: "同花顺", effect: "最强爆发" },
 ];
+const TUTORIAL_STEPS = [
+  {
+    title: "拖动扑克牌交换",
+    description: "按住一张牌，拖到它上、下、左、右相邻的牌上。只有能组成消除的交换才会生效。",
+  },
+  {
+    title: "同点数或同花色都能消",
+    description: "横向或纵向凑齐至少 3 张：点数相同可以消，花色相同也可以消。",
+  },
+  {
+    title: "集满 5 张自动放技能",
+    description: "每次消除都会收集扑克牌。技能槽集满后自动判断牌型，并释放技能攻击怪物。",
+  },
+] as const;
 
 export function App() {
+  const sessionId = useRef(0);
+  const [saveData, setSaveData] = useState(loadGameSave);
+  const [tutorialStep, setTutorialStep] = useState<number | null>(() => (saveData.tutorialCompleted ? null : 0));
   const [board, setBoard] = useState(() => createBoard());
   const [monsters, setMonsters] = useState<Monster[]>(() => createWave(1));
   const [phase, setPhase] = useState<Phase>("ready");
@@ -83,6 +101,16 @@ export function App() {
   const [energyParticles, setEnergyParticles] = useState<EnergyParticle[]>([]);
   const [hitMonsterIds, setHitMonsterIds] = useState<string[]>([]);
   const [result, setResult] = useState<"win" | "lose" | null>(null);
+  const [defeatedMonsters, setDefeatedMonsters] = useState(0);
+  const [highestCombo, setHighestCombo] = useState(0);
+  const [strongestSkill, setStrongestSkill] = useState<PokerEvaluation | null>(null);
+
+  function schedule(callback: () => void, delay: number) {
+    const scheduledSession = sessionId.current;
+    window.setTimeout(() => {
+      if (sessionId.current === scheduledSession) callback();
+    }, delay);
+  }
 
   useEffect(() => {
     if (phase !== "combat") return;
@@ -102,15 +130,17 @@ export function App() {
 
   useEffect(() => {
     if (spirit <= 0 && phase !== "ended") {
+      sessionId.current += 1;
       setResult("lose");
       setPhase("ended");
     }
   }, [phase, spirit]);
 
   useEffect(() => {
-    if (phase !== "combat" || monsters.length > 0) return;
+    if (phase !== "combat" || monsters.length > 0 || spirit <= 0) return;
 
     if (wave >= MAX_WAVE) {
+      sessionId.current += 1;
       setResult("win");
       setPhase("ended");
       return;
@@ -121,7 +151,17 @@ export function App() {
     setMonsters(createWave(nextWave));
     setCombo(0);
     setLastCombo(`第 ${nextWave} 波来了`);
-  }, [monsters.length, phase, wave]);
+  }, [monsters.length, phase, spirit, wave]);
+
+  useEffect(() => {
+    if (phase !== "ended" || !result) return;
+
+    setSaveData((current) => {
+      const next = mergeGameSave(current, { highScore: score, farthestWave: wave });
+      saveGameSave(next);
+      return next;
+    });
+  }, [phase, result, score, wave]);
 
   function showSwapFeedback(first: BoardCell, second: BoardCell, status: "valid" | "invalid") {
     setSwapFeedback({
@@ -131,7 +171,7 @@ export function App() {
       to: `${second.x}-${second.y}`,
       status,
     });
-    window.setTimeout(() => setSwapFeedback(null), status === "valid" ? 680 : 360);
+    schedule(() => setSwapFeedback(null), status === "valid" ? 680 : 360);
   }
 
   function trySwap(first: BoardCell, second: BoardCell) {
@@ -156,7 +196,7 @@ export function App() {
     clearSelection();
     setPhase("swapping");
 
-    window.setTimeout(() => {
+    schedule(() => {
       resolveMatches(swapResult.board, swapResult.matches, 1, monsters, skillCards, combo, wave);
     }, 560);
   }
@@ -198,6 +238,11 @@ export function App() {
     setFloatingTexts([...outcome.texts, ...skillTexts]);
     setScore((value) => value + outcome.score);
     setCombo(nextCombo);
+    setHighestCombo((value) => Math.max(value, nextCombo));
+    setDefeatedMonsters((value) => value + outcome.killed + (skillOutcome?.killed ?? 0));
+    if (skillEvaluation) {
+      setStrongestSkill((current) => (!current || skillEvaluation.power > current.power ? skillEvaluation : current));
+    }
     setMatchBurst({
       id: Date.now(),
       label: nextCombo > 1 ? `${nextCombo} 连消！` : "消除！",
@@ -232,17 +277,17 @@ export function App() {
     setPhase("refilling");
 
     if (hasCascade) {
-      window.setTimeout(() => {
+      schedule(() => {
         setMatchedCellKeys(getMatchedCellKeys(cascadeMatches));
         setPhase("swapping");
         setLastCombo(`连锁 ${cascadeStep + 1}！`);
-        window.setTimeout(() => {
+        schedule(() => {
           resolveMatches(refilledBoard, cascadeMatches, cascadeStep + 1, nextMonsters, nextSkillCards, nextCombo, waveBridge.wave);
         }, 560);
       }, 420);
     } else {
-      window.setTimeout(() => setPhase("combat"), 360);
-      window.setTimeout(() => {
+      schedule(() => setPhase("combat"), 360);
+      schedule(() => {
         setFloatingTexts([]);
         setGainedCardIds([]);
         setMatchedCellKeys([]);
@@ -301,10 +346,11 @@ export function App() {
     trySwap(selectedCell, cell);
   }
 
-  function restart() {
+  function restart(startImmediately = false) {
+    sessionId.current += 1;
     setBoard(createBoard());
     setMonsters(createWave(1));
-    setPhase("ready");
+    setPhase(startImmediately ? "combat" : "ready");
     setWave(1);
     setSpirit(MAX_SPIRIT);
     clearSelection();
@@ -325,6 +371,17 @@ export function App() {
     setEnergyParticles([]);
     setHitMonsterIds([]);
     setResult(null);
+    setDefeatedMonsters(0);
+    setHighestCombo(0);
+    setStrongestSkill(null);
+  }
+
+  function completeTutorial() {
+    const next = mergeGameSave(saveData, { tutorialCompleted: true });
+    saveGameSave(next);
+    setSaveData(next);
+    setTutorialStep(null);
+    setPhase("combat");
   }
 
   return (
@@ -515,11 +572,41 @@ export function App() {
         </div>
       </section>
 
-      {phase === "ready" && (
+      {tutorialStep !== null && (
+        <div className="modal tutorial-modal" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
+          <div className="dialog tutorial-dialog">
+            <span className="tutorial-progress">新手引导 {tutorialStep + 1}/{TUTORIAL_STEPS.length}</span>
+            <h2 id="tutorial-title">{TUTORIAL_STEPS[tutorialStep].title}</h2>
+            <div className={`tutorial-visual tutorial-visual-${tutorialStep + 1}`} aria-hidden="true">
+              {tutorialStep === 0 ? "拖动 ↔ 交换" : tutorialStep === 1 ? "3 张连成一线" : "5 张 → 牌型技能"}
+            </div>
+            <p>{TUTORIAL_STEPS[tutorialStep].description}</p>
+            <div className="tutorial-actions">
+              <div className="tutorial-dots" aria-hidden="true">
+                {TUTORIAL_STEPS.map((step, index) => (
+                  <span key={step.title} className={index === tutorialStep ? "active" : ""} />
+                ))}
+              </div>
+              <button
+                className="primary-button"
+                onClick={() => {
+                  if (tutorialStep < TUTORIAL_STEPS.length - 1) setTutorialStep(tutorialStep + 1);
+                  else completeTutorial();
+                }}
+              >
+                {tutorialStep < TUTORIAL_STEPS.length - 1 ? "下一步" : "开始游戏"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {phase === "ready" && tutorialStep === null && (
         <div className="modal">
           <div className="dialog">
             <h2>开始消除</h2>
             <p>拖动相邻牌交换，凑 3 张同点数或同花色就会消除。技能会自动释放。</p>
+            <p className="record-line">历史最高 {saveData.highScore} 分 · 最远第 {saveData.farthestWave} 波</p>
             <button className="primary-button" onClick={() => setPhase("combat")}>
               <Play size={18} />
               开始
@@ -530,12 +617,18 @@ export function App() {
 
       {phase === "ended" && (
         <div className="modal">
-          <div className="dialog">
+          <div className="dialog result-dialog">
             <h2>{result === "win" ? "今天守住了！" : "今天没守住……"}</h2>
-            <p>
-              最终分数：{score}。第 {wave} 波结束。
-            </p>
-            <button className="primary-button" onClick={restart}>
+            <p>{result === "win" ? "五波压力全部清空。" : "工位失守，调整节奏再来一局。"}</p>
+            <div className="result-summary" aria-label="本局统计">
+              <ResultItem label="本局分数" value={`${score}`} />
+              <ResultItem label="击败怪物" value={`${defeatedMonsters}`} />
+              <ResultItem label="最高连击" value={`${highestCombo}`} />
+              <ResultItem label="最强牌型" value={strongestSkill?.label ?? "未释放"} />
+              <ResultItem label="到达波次" value={`${wave}/${MAX_WAVE}`} />
+            </div>
+            <p className="record-line">历史最高 {saveData.highScore} 分 · 最远第 {saveData.farthestWave} 波</p>
+            <button className="primary-button" onClick={() => restart(true)}>
               <RotateCcw size={18} />
               再来一局
             </button>
@@ -660,7 +753,7 @@ function applyMatchesToMonsters(
   monsters: Monster[],
   matches: BoardMatch[],
   combo: number,
-): { label: string; monsters: Monster[]; score: number; targetIds: string[]; texts: FloatingText[] } {
+): { killed: number; label: string; monsters: Monster[]; score: number; targetIds: string[]; texts: FloatingText[] } {
   const damageByMonster = new Map<string, number>();
   const sorted = [...monsters].sort((a, b) => a.x - b.x);
   let totalDamage = 0;
@@ -702,7 +795,7 @@ function applyMatchesToMonsters(
   });
 
   const label = `${combo} 连消：${totalDamage} 伤害${killed > 0 ? `，击倒 ${killed} 个` : ""}`;
-  return { label, monsters: nextMonsters, score, targetIds: [...damageByMonster.keys()], texts };
+  return { killed, label, monsters: nextMonsters, score, targetIds: [...damageByMonster.keys()], texts };
 }
 
 function createSkillFloatingTexts(monsters: Monster[], targetIds: string[], damage: number): FloatingText[] {
@@ -774,6 +867,15 @@ function getMatchedCellKeys(matches: BoardMatch[]): string[] {
 function Stat({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className={`stat ${danger ? "danger" : ""}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ResultItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
