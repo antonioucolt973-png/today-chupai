@@ -17,6 +17,7 @@ import { fillSkillSlots, pickCardsForSkillSlots } from "./game/skillSlots";
 import type { BoardCell, BoardMatch, Card, FloatingText, Monster, PokerEvaluation } from "./game/types";
 
 type Phase = "ready" | "combat" | "swapping" | "refilling" | "ended";
+type OrientationRequestStatus = "idle" | "requesting" | "fallback";
 type MatchBurst = {
   detail: string;
   id: number;
@@ -69,8 +70,10 @@ const TUTORIAL_STEPS = [
 
 export function App() {
   const sessionId = useRef(0);
+  const lightweightEffects = useRef(prefersLightweightEffects()).current;
   const [saveData, setSaveData] = useState(loadGameSave);
   const [tutorialStep, setTutorialStep] = useState<number | null>(() => (saveData.tutorialCompleted ? null : 0));
+  const [orientationStatus, setOrientationStatus] = useState<OrientationRequestStatus>("idle");
   const [board, setBoard] = useState(() => createBoard());
   const [monsters, setMonsters] = useState<Monster[]>(() => createWave(1));
   const [phase, setPhase] = useState<Phase>("ready");
@@ -113,17 +116,46 @@ export function App() {
   }
 
   useEffect(() => {
+    const root = document.documentElement;
+    let wasLandscape = window.innerWidth > window.innerHeight;
+
+    function syncViewport() {
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      root.style.setProperty("--app-height", `${Math.round(viewportHeight)}px`);
+
+      const isLandscape = window.innerWidth > window.innerHeight;
+      if (isLandscape !== wasLandscape) {
+        wasLandscape = isLandscape;
+        if (isLandscape) setOrientationStatus("idle");
+        window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "instant" }));
+      }
+    }
+
+    syncViewport();
+    window.addEventListener("resize", syncViewport, { passive: true });
+    window.addEventListener("orientationchange", syncViewport, { passive: true });
+    window.visualViewport?.addEventListener("resize", syncViewport, { passive: true });
+
+    return () => {
+      window.removeEventListener("resize", syncViewport);
+      window.removeEventListener("orientationchange", syncViewport);
+      window.visualViewport?.removeEventListener("resize", syncViewport);
+      root.style.removeProperty("--app-height");
+    };
+  }, []);
+
+  useEffect(() => {
     if (phase !== "combat") return;
 
     const timer = window.setInterval(() => {
       setMonsters((current) => {
-        const { survivors, leaks } = moveMonsters(current, 0.2);
+        const { survivors, leaks } = moveMonsters(current, 0.25);
         if (leaks > 0) {
           setSpirit((value) => Math.max(0, value - leaks));
         }
         return survivors;
       });
-    }, 200);
+    }, 250);
 
     return () => window.clearInterval(timer);
   }, [phase]);
@@ -222,7 +254,7 @@ export function App() {
     const nextSkillCards = skillSlotResult.slots;
     const skillTexts = skillOutcome ? createSkillFloatingTexts(waveBridge.monsters, skillOutcome.targets, skillOutcome.damage) : [];
     const hitIds = [...new Set([...outcome.targetIds, ...(skillOutcome?.targets ?? [])])];
-    const particles = createEnergyParticles(matches, gainedCards.length, hitIds.length);
+    const particles = createEnergyParticles(matches, gainedCards.length, hitIds.length, lightweightEffects);
     const refilledBoard = removeMatchesAndRefill(sourceBoard, matches, {
       clearImmediateMatches: cascadeStep >= MAX_CASCADE_STEPS,
       ensurePlayableBoard: false,
@@ -384,8 +416,57 @@ export function App() {
     setPhase("combat");
   }
 
+  async function requestLandscapeMode() {
+    setOrientationStatus("requesting");
+
+    try {
+      const target = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void> | void;
+      };
+      const fullscreenDocument = document as Document & { webkitFullscreenElement?: Element | null };
+
+      if (!document.fullscreenElement && !fullscreenDocument.webkitFullscreenElement) {
+        if (target.requestFullscreen) {
+          await target.requestFullscreen({ navigationUI: "hide" });
+        } else if (target.webkitRequestFullscreen) {
+          await Promise.resolve(target.webkitRequestFullscreen());
+        } else {
+          throw new Error("fullscreen-unavailable");
+        }
+      }
+
+      const orientation = window.screen.orientation as ScreenOrientation & {
+        lock?: (mode: "landscape") => Promise<void>;
+      };
+      if (!orientation?.lock) throw new Error("orientation-lock-unavailable");
+
+      await orientation.lock("landscape");
+      setOrientationStatus("idle");
+    } catch {
+      setOrientationStatus("fallback");
+    }
+  }
+
   return (
-    <main className="app">
+    <main className={`app ${lightweightEffects ? "lightweight-effects" : ""}`}>
+      <div className="orientation-gate" role="status" aria-live="polite">
+        <div className="orientation-phone" aria-hidden="true">↻</div>
+        <strong>横屏游玩</strong>
+        <span>
+          {orientationStatus === "fallback"
+            ? "自动横屏失败，请关闭系统方向锁定后手动横屏"
+            : "点击后将尝试进入全屏并自动切换横屏"}
+        </span>
+        <button
+          type="button"
+          className="primary-button orientation-button"
+          disabled={orientationStatus === "requesting"}
+          onClick={requestLandscapeMode}
+        >
+          {orientationStatus === "requesting" ? "正在切换……" : "横屏开始游戏"}
+        </button>
+        <small>若浏览器不支持，仍可手动旋转手机</small>
+      </div>
       <header className="topbar">
         <div>
           <h1>今天也要出牌</h1>
@@ -810,9 +891,15 @@ function createSkillFloatingTexts(monsters: Monster[], targetIds: string[], dama
   });
 }
 
-function createEnergyParticles(matches: BoardMatch[], gainedCards: number, targetCount: number): EnergyParticle[] {
+function createEnergyParticles(
+  matches: BoardMatch[],
+  gainedCards: number,
+  targetCount: number,
+  lightweight = false,
+): EnergyParticle[] {
   const cells = matches.flatMap((match) => match.cells);
-  const selectedCells = cells.slice(0, Math.min(cells.length, 10));
+  const particleLimit = lightweight ? 4 : 10;
+  const selectedCells = cells.slice(0, Math.min(cells.length, particleLimit));
   const stamp = Date.now();
   const particles: EnergyParticle[] = [];
 
@@ -880,4 +967,9 @@ function ResultItem({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function prefersLightweightEffects(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(pointer: coarse)").matches || window.matchMedia("(max-width: 1024px)").matches;
 }

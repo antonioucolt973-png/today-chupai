@@ -35,6 +35,7 @@ button {
 
 .app {
   min-height: 100vh;
+  min-height: var(--app-height, 100dvh);
   padding: 12px;
   background:
     radial-gradient(circle at 50% -20%, rgba(201, 154, 61, 0.2), transparent 38%),
@@ -42,6 +43,10 @@ button {
     linear-gradient(0deg, rgba(201, 154, 61, 0.035) 1px, transparent 1px),
     linear-gradient(145deg, #13241c, #08100d 74%);
   background-size: auto, 32px 32px, 32px 32px, auto;
+}
+
+.orientation-gate {
+  display: none;
 }
 
 .topbar {
@@ -2571,13 +2576,24 @@ h1 {
 }
 
 @media (orientation: landscape) and (max-height: 560px) and (max-width: 1024px) {
+  html,
+  body,
+  #root {
+    height: var(--app-height, 100dvh);
+    overflow: hidden;
+  }
+
   .app {
-    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    height: var(--app-height, 100dvh);
+    min-height: 0;
+    overflow: hidden;
     padding:
-      max(6px, env(safe-area-inset-top))
-      max(6px, env(safe-area-inset-right))
-      max(6px, env(safe-area-inset-bottom))
-      max(6px, env(safe-area-inset-left));
+      max(4px, env(safe-area-inset-top))
+      max(4px, env(safe-area-inset-right))
+      max(4px, env(safe-area-inset-bottom))
+      max(4px, env(safe-area-inset-left));
   }
 
   .topbar,
@@ -2587,6 +2603,7 @@ h1 {
   }
 
   .topbar {
+    flex: 0 0 30px;
     align-items: center;
     flex-direction: row;
     gap: 8px;
@@ -2595,7 +2612,7 @@ h1 {
   }
 
   h1 {
-    font-size: 18px;
+    font-size: 16px;
     white-space: nowrap;
   }
 
@@ -2623,30 +2640,47 @@ h1 {
   }
 
   .game-shell {
-    grid-template-columns: minmax(350px, 1.15fr) minmax(270px, 0.9fr);
+    flex: 1 1 auto;
+    grid-template-columns: minmax(0, 56fr) minmax(0, 44fr);
+    align-items: stretch;
     gap: 6px;
+    width: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .board-panel,
   .battle-panel {
+    min-width: 0;
+    min-height: 0;
     padding: 4px;
+    overflow: hidden;
   }
 
   .section-title {
-    gap: 6px;
-    margin-bottom: 2px;
-    font-size: 10px;
+    display: none;
+  }
+
+  .board-panel {
+    display: flex;
   }
 
   .board {
-    grid-template-columns: repeat(7, minmax(38px, 1fr));
+    flex: 1;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-rows: repeat(7, minmax(0, 1fr));
     gap: 2px;
-    padding: 5px;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 4px;
   }
 
   .card-tile {
-    height: 40px;
-    min-height: 40px;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    min-height: 0;
   }
 
   .card-rank {
@@ -2668,7 +2702,13 @@ h1 {
   }
 
   .lane {
-    min-height: 264px;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .battle-panel {
+    display: flex;
+    flex-direction: column;
   }
 
   .base {
@@ -2682,16 +2722,20 @@ h1 {
   }
 
   .combat-log {
-    min-height: 26px;
+    flex: 0 0 25px;
+    min-height: 25px;
     padding: 3px 8px;
     font-size: 12px;
   }
 
   .skill-slot-panel {
+    flex: 0 0 40px;
     grid-template-columns: 58px minmax(250px, 1fr) minmax(165px, 0.7fr);
     gap: 6px;
-    margin-top: 6px;
-    padding: 5px 7px;
+    width: 100%;
+    min-height: 0;
+    margin-top: 4px;
+    padding: 3px 7px;
   }
 
   .skill-mini-reference {
@@ -2703,7 +2747,7 @@ h1 {
   }
 
   .skill-slot {
-    min-height: 44px;
+    min-height: 32px;
   }
 
   .skill-slot.filled span {
@@ -2768,18 +2812,129 @@ h1 {
 }
 
 @media (orientation: landscape) and (max-height: 560px) and (max-width: 640px) {
-  .game-shell,
   .skill-slot-panel {
-    grid-template-columns: 1fr;
+    grid-template-columns: 52px minmax(210px, 1fr) minmax(132px, 0.62fr);
+  }
+}
+
+@media (orientation: portrait) and (max-width: 720px) {
+  html,
+  body,
+  #root,
+  .app {
+    height: var(--app-height, 100dvh);
+    overflow: hidden;
   }
 
-  .board {
-    grid-template-columns: repeat(7, minmax(40px, 1fr));
+  .orientation-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 10px;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 50% 42%, rgba(201, 154, 61, 0.22), transparent 32%),
+      #08100d;
+    color: var(--casino-ivory);
+    text-align: center;
   }
 
-  .skill-slot-panel {
-    grid-template-columns: 58px minmax(250px, 1fr) minmax(150px, 0.7fr);
+  .orientation-phone {
+    display: grid;
+    place-items: center;
+    width: 116px;
+    height: 68px;
+    border: 4px solid var(--casino-gold-bright);
+    border-radius: 14px;
+    color: var(--casino-gold-bright);
+    font-size: 38px;
+    animation: orientationHint 1600ms ease-in-out infinite;
   }
+
+  .orientation-gate strong {
+    margin-top: 8px;
+    font-size: 24px;
+  }
+
+  .orientation-gate span {
+    max-width: 320px;
+    color: var(--casino-muted);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .orientation-button {
+    min-width: 180px;
+    margin-top: 8px;
+  }
+
+  .orientation-button:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
+  .orientation-gate small {
+    color: rgba(184, 170, 145, 0.76);
+    font-size: 12px;
+  }
+}
+
+@keyframes orientationHint {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(-8deg);
+  }
+}
+
+.lightweight-effects .board,
+.lightweight-effects .lane {
+  contain: layout paint;
+}
+
+.lightweight-effects .board-panel,
+.lightweight-effects .battle-panel,
+.lightweight-effects .skill-slot-panel {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.lightweight-effects .card-tile {
+  box-shadow:
+    inset 0 2px 0 currentColor,
+    0 1px 2px rgba(0, 0, 0, 0.22);
+  transition-duration: 100ms;
+}
+
+.lightweight-effects .monster {
+  transition: left 260ms linear;
+}
+
+.lightweight-effects .monster::before {
+  filter: none;
+  animation: none;
+}
+
+.lightweight-effects .skill-cinematic::before,
+.lightweight-effects .skill-cinematic::after,
+.lightweight-effects .skill-impact span:nth-child(n + 2),
+.lightweight-effects .match-spark.spark-4,
+.lightweight-effects .match-spark.spark-5 {
+  display: none;
+}
+
+.lightweight-effects .modal {
+  backdrop-filter: none;
+}
+
+.lightweight-effects .energy-particle,
+.lightweight-effects .card-tile.matched,
+.lightweight-effects .skill-showcase {
+  will-change: transform, opacity;
 }
 
 @media (max-width: 620px) {
