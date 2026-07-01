@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { Play, RotateCcw } from "lucide-react";
 import { cardLabel, suitLabels } from "./game/cards";
 import {
@@ -96,7 +96,6 @@ export function App() {
   const [gainedCardIds, setGainedCardIds] = useState<string[]>([]);
   const [lastSkill, setLastSkill] = useState<PokerEvaluation | null>(null);
   const [matchedCellKeys, setMatchedCellKeys] = useState<string[]>([]);
-  const [refillWave, setRefillWave] = useState(0);
   const [skillBurst, setSkillBurst] = useState(false);
   const [skillCast, setSkillCast] = useState<PokerEvaluation | null>(null);
   const [skillShowcase, setSkillShowcase] = useState<SkillShowcase | null>(null);
@@ -305,7 +304,6 @@ export function App() {
           }${waveBridge.advanced ? `，第 ${waveBridge.wave} 波接上` : ""}${hasCascade ? "，继续连锁" : ""}`,
     );
     setBoard(visibleBoard);
-    setRefillWave((value) => value + 1);
     setPhase("refilling");
 
     if (hasCascade) {
@@ -389,7 +387,6 @@ export function App() {
     setSwapFeedback(null);
     setFloatingTexts([]);
     setMatchedCellKeys([]);
-    setRefillWave(0);
     setLastCombo("交换消除，自动攻击");
     setScore(0);
     setCombo(0);
@@ -446,6 +443,69 @@ export function App() {
       setOrientationStatus("fallback");
     }
   }
+
+  // 怪物每 250ms 移动一次；缓存卡牌节点，避免这些更新反复协调整个 7x7 棋盘。
+  // 交互状态变化时会重新生成节点，因此事件处理器仍会拿到最新的棋盘状态。
+  const boardCells = useMemo(() => {
+    const matchedCellSet = new Set(matchedCellKeys);
+    const matchedIndexByKey = new Map(matchedCellKeys.map((key, index) => [key, index]));
+
+    return board.flat().map((cell) => {
+      const selected = selectedCell?.x === cell.x && selectedCell.y === cell.y;
+      const adjacent = selectedCell ? areAdjacent(selectedCell, cell) : false;
+      const cellKey = `${cell.x}-${cell.y}`;
+      const matched = matchedCellSet.has(cellKey);
+      const matchedIndex = matchedIndexByKey.get(cellKey) ?? 0;
+      const feedbackClass =
+        swapFeedback?.from === cellKey
+          ? `swap-${swapFeedback.status} swap-from`
+          : swapFeedback?.to === cellKey
+            ? `swap-${swapFeedback.status} swap-to`
+            : "";
+      const swapStyle =
+        swapFeedback?.from === cellKey
+          ? ({
+              "--swap-start-x": `${swapFeedback.dx * 112}%`,
+              "--swap-start-y": `${swapFeedback.dy * 112}%`,
+              "--drop-delay": `${cell.y * 34 + cell.x * 8}ms`,
+              "--match-delay": `${matchedIndex * 38}ms`,
+            } as CSSProperties)
+          : swapFeedback?.to === cellKey
+            ? ({
+                "--swap-start-x": `${swapFeedback.dx * -112}%`,
+                "--swap-start-y": `${swapFeedback.dy * -112}%`,
+                "--drop-delay": `${cell.y * 34 + cell.x * 8}ms`,
+                "--match-delay": `${matchedIndex * 38}ms`,
+              } as CSSProperties)
+            : ({
+                "--drop-delay": `${cell.y * 34 + cell.x * 8}ms`,
+                "--match-delay": `${matchedIndex * 38}ms`,
+              } as CSSProperties);
+
+      return (
+        <button
+          key={cellKey}
+          className={`card-tile ${cell.card.suit} ${selected ? "selected" : ""} ${adjacent ? "adjacent" : ""} ${matched ? "matched" : ""} ${feedbackClass}`}
+          data-x={cell.x}
+          data-y={cell.y}
+          style={swapStyle}
+          onClick={() => onCellClick(cell)}
+          onPointerDown={(event) => onCellPointerDown(cell, event)}
+          onPointerUp={onCellPointerUp}
+          onPointerCancel={clearSelection}
+          disabled={phase !== "combat"}
+          aria-label={`${cardLabel(cell.card)}，拖动到相邻牌交换`}
+        >
+          <span className="card-rank">{cell.card.rank}</span>
+          <strong className="card-suit">{suitLabels[cell.card.suit]}</strong>
+          {matched &&
+            Array.from({ length: lightweightEffects ? 3 : 5 }, (_, index) => (
+              <i key={index} className={`match-spark spark-${index + 1}`} aria-hidden="true" />
+            ))}
+        </button>
+      );
+    });
+  }, [board, dragCell, lightweightEffects, matchedCellKeys, phase, selectedCell, swapFeedback]);
 
   return (
     <main className={`app ${lightweightEffects ? "lightweight-effects" : ""}`}>
@@ -513,60 +573,7 @@ export function App() {
                 aria-hidden="true"
               />
             ))}
-            {board.flat().map((cell) => {
-              const selected = selectedCell?.x === cell.x && selectedCell.y === cell.y;
-              const adjacent = selectedCell ? areAdjacent(selectedCell, cell) : false;
-              const cellKey = `${cell.x}-${cell.y}`;
-              const matched = matchedCellKeys.includes(cellKey);
-              const matchedIndex = matched ? matchedCellKeys.indexOf(cellKey) : 0;
-              const feedbackClass =
-                swapFeedback?.from === cellKey
-                  ? `swap-${swapFeedback.status} swap-from`
-                  : swapFeedback?.to === cellKey
-                    ? `swap-${swapFeedback.status} swap-to`
-                    : "";
-              const swapStyle =
-                swapFeedback?.from === cellKey
-                  ? ({
-                      "--swap-start-x": `${swapFeedback.dx * 112}%`,
-                      "--swap-start-y": `${swapFeedback.dy * 112}%`,
-                      "--drop-delay": `${cell.y * 34 + cell.x * 8}ms`,
-                      "--match-delay": `${matchedIndex * 38}ms`,
-                    } as CSSProperties)
-                  : swapFeedback?.to === cellKey
-                    ? ({
-                        "--swap-start-x": `${swapFeedback.dx * -112}%`,
-                        "--swap-start-y": `${swapFeedback.dy * -112}%`,
-                        "--drop-delay": `${cell.y * 34 + cell.x * 8}ms`,
-                        "--match-delay": `${matchedIndex * 38}ms`,
-                      } as CSSProperties)
-                    : ({
-                        "--drop-delay": `${cell.y * 34 + cell.x * 8}ms`,
-                        "--match-delay": `${matchedIndex * 38}ms`,
-                      } as CSSProperties);
-              return (
-                <button
-                  key={`${cell.x}-${cell.y}-${refillWave}`}
-                  className={`card-tile ${cell.card.suit} ${selected ? "selected" : ""} ${adjacent ? "adjacent" : ""} ${matched ? "matched" : ""} ${feedbackClass}`}
-                  data-x={cell.x}
-                  data-y={cell.y}
-                  style={swapStyle}
-                  onClick={() => onCellClick(cell)}
-                  onPointerDown={(event) => onCellPointerDown(cell, event)}
-                  onPointerUp={onCellPointerUp}
-                  onPointerCancel={clearSelection}
-                  disabled={phase !== "combat"}
-                  aria-label={`${cardLabel(cell.card)}，拖动到相邻牌交换`}
-                >
-                  <span className="card-rank">{cell.card.rank}</span>
-                  <strong className="card-suit">{suitLabels[cell.card.suit]}</strong>
-                  {matched &&
-                    Array.from({ length: 5 }, (_, index) => (
-                      <i key={index} className={`match-spark spark-${index + 1}`} aria-hidden="true" />
-                    ))}
-                </button>
-              );
-            })}
+            {boardCells}
           </div>
         </section>
 

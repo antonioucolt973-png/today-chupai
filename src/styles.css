@@ -2910,6 +2910,22 @@ h1 {
   transition-duration: 100ms;
 }
 
+.lightweight-effects .board.refilling .card-tile {
+  animation: none;
+}
+
+.lightweight-effects .board.refilling .card-tile[data-y="0"] {
+  animation: tileDrop 220ms cubic-bezier(0.18, 0.92, 0.2, 1.12) both;
+}
+
+.lightweight-effects .card-tile.matched,
+.lightweight-effects .card-tile.matched::after,
+.lightweight-effects .card-tile.matched .card-rank,
+.lightweight-effects .card-tile.matched .card-suit,
+.lightweight-effects .match-spark {
+  animation-duration: 300ms;
+}
+
 .lightweight-effects .monster {
   transition: left 260ms linear;
 }
